@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -35,20 +36,13 @@ public class Main {
      *         or null if the ready queue is empty
      */
     static PCBClass nextProcess(){
-        if(readyQueue.isEmpty()){
-            return null;
-        }
-        PCBClass highestPriority = null;
-        int smallestPriority = Integer.MAX_VALUE;
-
-        for(PCBClass p : readyQueue){
-            if(p.getPriority() < smallestPriority){
-                smallestPriority = p.getPriority();
-                highestPriority = p;
-            }
-        }
-        readyQueue.remove(highestPriority);
-        return highestPriority;
+        return readyQueue.stream()
+                .min(Comparator.comparingInt(PCBClass::getPriority))
+                .map(p -> {
+                    readyQueue.remove(p);
+                    return p;
+                })
+                .orElse(null);
     }
 
     /**
@@ -157,10 +151,11 @@ public class Main {
         System.out.println("| Process  | Start Time | End Time |");
         System.out.println("+----------+------------+----------+");
 
-        for (GanttEntry entry : ganttChart) {
-            System.out.printf("| P%-7d | %-10d | %-8d |%n",
-                    entry.processId, entry.startTime, entry.endTime);
-        }
+
+        ganttChart.forEach(entry ->
+                System.out.printf("| P%-7d | %-10d | %-8d |%n",
+                        entry.processId, entry.startTime, entry.endTime)
+        );
 
         System.out.println("+----------+------------+----------+");
     }
@@ -172,13 +167,22 @@ public class Main {
     static void printSignalCounts() {
         System.out.println("\nSignal Count per Process:");
 
-        for (PCBClass process : processes) {
-            System.out.printf("P%d: %d signals\n", process.getP_ID(), process.getReceivedSignals());
-        }
+        // Calculate total using stream reduce
+        int totalSignals = processes.stream()
+                .mapToInt(PCBClass::getReceivedSignals)
+                .sum();
+
+        // Print each process
+        processes.forEach(process ->
+                System.out.printf("P%d: %d signals%n",
+                        process.getP_ID(), process.getReceivedSignals())
+        );
+
+        System.out.printf("\nTotal signals: %d%n", totalSignals);
     }
 
     public static void main(String[] args) {
-        // Step 1: Initialize
+        // Initialize
         processes.add(p1);
         processes.add(p2);
         currProcess = p1;
@@ -186,7 +190,7 @@ public class Main {
 
         int ganttStartTime = 0;
 
-        // Step 2: Main simulation loop
+
         while (currProcess != null || !readyQueue.isEmpty()) {
             // Check if we have a process to run
             ProcessCheckResult result = processChecker(ganttStartTime);
@@ -209,7 +213,7 @@ public class Main {
             }
         }
 
-        // Step 3: Print results
+        // Print results
         printGanttChart();
         printSignalCounts();
     }
@@ -340,15 +344,17 @@ class ForkClass {
      */
     public static PCBClass forkProcess(PCBClass parent, int nextPID) {
         String parentProgram = parent.getProgram();
-        String childProgram = "";
 
-        // Determine child program based on parent
-        if (parentProgram.equals("PA")) {
-            childProgram = "PB";  // PA forks PB
-        } else if (parentProgram.equals("PB")) {
-            childProgram = "PC";  // PB forks PC
-        } else {
-            return null;  // PC doesn't fork
+        // Determine child program based on parent using switch expression
+        String childProgram = switch (parentProgram) {
+            case "PA" -> "PB";  // PA forks PB
+            case "PB" -> "PC";  // PB forks PC
+            default -> null;    // PC doesn't fork
+        };
+
+        // PC doesn't fork
+        if (childProgram == null) {
+            return null;
         }
 
         // Create the new process
