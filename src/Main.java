@@ -13,7 +13,7 @@ public class Main {
     //starts at P_ID 3 because the next process to be created is 3
     static int nextPID = 3;
     //Track all processes
-    static List<PCBClass> allProcesses = new ArrayList<>();
+    static List<PCBClass> processes = new ArrayList<>();
     //Gantt chart to track execution timeline
     static List<GanttEntry> ganttChart = new ArrayList<>();
 
@@ -34,7 +34,7 @@ public class Main {
      * @return the PCBClass object with the highest priority (smallest priority number),
      *         or null if the ready queue is empty
      */
-    static PCBClass selectNextProcess(){
+    static PCBClass nextProcess(){
         if(readyQueue.isEmpty()){
             return null;
         }
@@ -52,31 +52,52 @@ public class Main {
     }
 
     /**
-     * Ensures a process is ready to run. Selects next process if current is null.
-     * @param ganttStartTime current Gantt start time
-     * @return updated ganttStartTime for the new/continuing process, or -1 if no processes available
+     * Wrapper class to indicate whether simulation should continue
      */
-    static int ensureProcessReady(int ganttStartTime) {
-        if (currProcess == null) {
-            currProcess = selectNextProcess();
-            if (currProcess == null) return -1; // Signal to stop simulation
-            return currTime; // New Gantt entry starts
+    static class ProcessCheckResult {
+        boolean shouldContinue;
+        int ganttStartTime;
+
+        ProcessCheckResult(boolean shouldContinue, int ganttStartTime) {
+            this.shouldContinue = shouldContinue;
+            this.ganttStartTime = ganttStartTime;
         }
-        return ganttStartTime; // No change
+    }
+
+    /**
+     * Checks if a process is ready to execute and selects next if needed.
+     * @param ganttStartTime current Gantt chart start time
+     * @return ProcessCheckResult containing continuation status and updated start time
+     */
+    static ProcessCheckResult processChecker(int ganttStartTime) {
+        if (currProcess == null) {
+            currProcess = nextProcess();
+
+            if (currProcess == null) {
+                // No processes available - simulation complete
+                return new ProcessCheckResult(false, ganttStartTime);
+            }
+
+            // New process selected - new Gantt entry starts
+            return new ProcessCheckResult(true, currTime);
+        }
+
+        // Current process still running - no change
+        return new ProcessCheckResult(true, ganttStartTime);
     }
 
     /**
      * Executes one tick of the current process and handles any forking.
      */
-    static void executeProcessTick() {
+    static void runTicks() {
         currProcess.executeTicks();
 
         // Check for forking
-        if (ForkClass.shouldFork(currProcess)) {
+        if (ForkClass.doFork(currProcess)) {
             PCBClass newProcess = ForkClass.forkProcess(currProcess, nextPID);
             if (newProcess != null) {
                 readyQueue.add(newProcess);
-                allProcesses.add(newProcess);
+                processes.add(newProcess);
                 nextPID++;
             }
         }
@@ -104,7 +125,7 @@ public class Main {
      * @param signalPending whether a signal needs to be delivered to next process
      * @return new ganttStartTime for the next process
      */
-    static int performContextSwitch(int ganttStartTime, boolean signalPending) {
+    static int doSwitch(int ganttStartTime, boolean signalPending) {
         // Record Gantt entry
         ganttChart.add(new GanttEntry(ganttStartTime, currTime, currProcess.getP_ID()));
 
@@ -115,7 +136,7 @@ public class Main {
         }
 
         // Select next process
-        currProcess = selectNextProcess();
+        currProcess = nextProcess();
 
         // Deliver pending signal if needed
         if (signalPending && currProcess != null) {
@@ -132,11 +153,16 @@ public class Main {
      */
     static void printGanttChart() {
         System.out.println("Gantt Chart:");
-        System.out.println("Time\tProcess");
+        System.out.println("+----------+------------+----------+");
+        System.out.println("| Process  | Start Time | End Time |");
+        System.out.println("+----------+------------+----------+");
 
         for (GanttEntry entry : ganttChart) {
-            System.out.printf("%d-%d\tP%d\n", entry.startTime, entry.endTime, entry.processId);
+            System.out.printf("| P%-7d | %-10d | %-8d |%n",
+                    entry.processId, entry.startTime, entry.endTime);
         }
+
+        System.out.println("+----------+------------+----------+");
     }
 
     /**
@@ -146,15 +172,15 @@ public class Main {
     static void printSignalCounts() {
         System.out.println("\nSignal Count per Process:");
 
-        for (PCBClass process : allProcesses) {
+        for (PCBClass process : processes) {
             System.out.printf("P%d: %d signals\n", process.getP_ID(), process.getReceivedSignals());
         }
     }
 
     public static void main(String[] args) {
         // Step 1: Initialize
-        allProcesses.add(p1);
-        allProcesses.add(p2);
+        processes.add(p1);
+        processes.add(p2);
         currProcess = p1;
         readyQueue.add(p2);
 
@@ -162,12 +188,13 @@ public class Main {
 
         // Step 2: Main simulation loop
         while (currProcess != null || !readyQueue.isEmpty()) {
-            // Ensure we have a process to run
-            ganttStartTime = ensureProcessReady(ganttStartTime);
-            if (ganttStartTime == -1) break; // No processes left
+            // Check if we have a process to run
+            ProcessCheckResult result = processChecker(ganttStartTime);
+            if (!result.shouldContinue) break; // No processes left
+            ganttStartTime = result.ganttStartTime;
 
-            // Execute one tick
-            executeProcessTick();
+            // Execute one tick and increment the current time
+            runTicks();
             currTime++;
 
             // Check if context switch needed
@@ -178,7 +205,7 @@ public class Main {
 
             // Perform context switch if needed
             if (needsSwitch) {
-                ganttStartTime = performContextSwitch(ganttStartTime, signalPending);
+                ganttStartTime = doSwitch(ganttStartTime, signalPending);
             }
         }
 
@@ -262,9 +289,6 @@ class PCBClass {
     public void incrementForkCounter(){
         forkCounter++;
     }
-    public void resetForkCounter(){
-        forkCounter = 0;
-    }
     public String getProgram() {
         return program;
     }
@@ -283,7 +307,7 @@ class ForkClass {
      * @param process the process to check
      * @return true if the process should fork now, false otherwise
      */
-    public static boolean shouldFork(PCBClass process) {
+    public static boolean doFork(PCBClass process) {
         int executedTicks = process.getExecutedTicks();
         String program = process.getProgram();
 
